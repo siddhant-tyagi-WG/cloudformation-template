@@ -1,4 +1,16 @@
 Resources:
+  MyDynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TableName: my-table
+
   MyLambdaFunction:
     Type: 'AWS::Lambda::Function'
     Properties:
@@ -15,6 +27,7 @@ Resources:
               }
       Handler: index.lambda_handler
       Role: !GetAtt MyLambdaRole.Arn
+        
       Runtime: python3.8
       
   MyLambdaFunction2:
@@ -23,28 +36,38 @@ Resources:
       Code:
         ZipFile: |
           import json
+          import boto3
+
+          dynamodb = boto3.resource('dynamodb')
+          table = dynamodb.Table('my-table')
 
           def lambda_handler(event, context):
-              # Parse JSON request body
-              request_body = json.loads(event['body'])
+              try:
+                  username = json.loads(event['body'])['username']
+              except (KeyError, json.JSONDecodeError):
+                  return {
+                      "statusCode": 400,
+                      "body": json.dumps({
+                          "error": "Invalid request body"
+                      })
+                  }
 
-              # Extract data from request body
-              name = request_body['name']
-              message = request_body['message']
+              table.put_item(Item={
+                  'username': username
+              })
 
-              # Construct response body
-              response_body = {
-                  'name': name,
-                  'message': message
-              }
-
-              # Return HTTP response
               return {
-                  'statusCode': 200,
-                  'body': json.dumps(response_body)
+                  "statusCode": 200,
+                  "body": json.dumps({
+                      "message": "Data inserted successfully"
+                  })
               }
+
+
+          
       Handler: index.lambda_handler
-      Role: !GetAtt MyLambdaRole.Arn
+      Role: !GetAtt MyLambdaRole2.Arn
+        
       Runtime: python3.8
   MyLambdaRole:
     Type: 'AWS::IAM::Role'
@@ -68,6 +91,36 @@ Resources:
                 Resource: 'arn:aws:logs:*:*:*'
             Version: 2012-10-17
           PolicyName: MyLambdaLogsPolicy
+
+  MyLambdaRole2:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: 2012-10-17
+      Path: /
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Effect: Allow
+                Resource: 'arn:aws:logs:*:*:*'
+              - Action:
+                  - 'dynamodb:PutItem'
+                Effect: Allow
+                Resource: !GetAtt MyDynamoDBTable.Arn
+            Version: 2012-10-17
+          PolicyName: MyLambdaPolicy
+          
+    
+      
   
   MyApiGateway:
     Type: 'AWS::ApiGateway::RestApi'
